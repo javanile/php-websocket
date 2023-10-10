@@ -10,7 +10,7 @@ class WebSocketServer
 
     protected function send($message, $to = ['broadcast' => true])
     {
-        if (is_array($message)) {
+        if (is_array($message) || is_object($message)) {
             $message = $this->seal(json_encode($message));
         }
 
