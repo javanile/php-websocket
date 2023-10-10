@@ -5,14 +5,25 @@ define('WEBSOCKET_PORT', $argv[2] ?? 8081);
 
 class WebSocketServer
 {
-    protected $clientSocketArray;
+    protected $clients;
+    protected $clientSockets;
 
-    protected function send($message)
+    protected function send($message, $to = ['broadcast' => true])
     {
-        $messageLength = strlen($message);
-        foreach($this->clientSocketArray as $clientSocket) {
-            @socket_write($clientSocket,$message,$messageLength);
+        if (is_array($message)) {
+            $message = $this->seal(json_encode($message));
         }
+
+        $messageLength = strlen($message);
+        foreach ($this->clientSockets as $clientSocket) {
+            if (
+                (isset($to['broadcast']) && $to['broadcast']) ||
+                (isset($to['socket']) && $to['socket'] == $clientSocket)
+            ) {
+                @socket_write($clientSocket, $message, $messageLength);
+            }
+        }
+
         return true;
     }
 
@@ -92,7 +103,7 @@ class WebSocketServer
     protected function prepare($socketMessage)
     {
         $message = null;
-        if ($socketMessage[0] == '{') {
+        if ($socketMessage && is_string($socketMessage) && $socketMessage[0] == '{') {
             $message = json_decode($socketMessage, true);
         }
         if (empty($message)) {
@@ -104,6 +115,17 @@ class WebSocketServer
         return $this->seal(json_encode($message));
     }
 
+    protected function add($socket, $greeting)
+    {
+        $socketId = md5(spl_object_hash($socket));
+
+        $this->clients[$socketId] = [
+            'id' => $socketId,
+            'socket' => $socket,
+            'greeting' => $greeting
+        ];
+    }
+
     public function run()
     {
         $socketResource = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
@@ -112,14 +134,14 @@ class WebSocketServer
         socket_listen($socketResource);
 
         $null = null;
-        $this->clientSocketArray = array($socketResource);
+        $this->clientSockets = array($socketResource);
         while (true) {
-            $newSocketArray = $this->clientSocketArray;
+            $newSocketArray = $this->clientSockets;
             socket_select($newSocketArray, $null, $null, 0, 10);
 
             if (in_array($socketResource, $newSocketArray)) {
                 $newSocket = socket_accept($socketResource);
-                $this->clientSocketArray[] = $newSocket;
+                $this->clientSockets[] = $newSocket;
 
                 $header = socket_read($newSocket, 1024);
                 $this->doHandshake($header, $newSocket, WEBSOCKET_HOST, WEBSOCKET_PORT);
@@ -127,7 +149,7 @@ class WebSocketServer
                 socket_getpeername($newSocket, $client_ip_address);
                 $connectionACK = $this->newConnectionACK($client_ip_address);
 
-                $this->send($connectionACK);
+                $this->send($connectionACK, ['socket' => $newSocket]);
 
                 $newSocketIndex = array_search($socketResource, $newSocketArray);
                 unset($newSocketArray[$newSocketIndex]);
@@ -136,8 +158,14 @@ class WebSocketServer
             foreach ($newSocketArray as $newSocketArrayResource) {
                 while (socket_recv($newSocketArrayResource, $socketData, 1024, 0) >= 1) {
                     $socketMessage = $this->unseal($socketData);
-                    $jsonMessage = $this->prepare($socketMessage);
-                    $this->send($jsonMessage);
+                    $socketId = md5(spl_object_hash($newSocketArrayResource));
+                    if (empty($this->clients[$socketId])) {
+                        $this->add($newSocketArrayResource, $socketMessage);
+                        $this->send(['welcome' => $socketId], ['socket' => $newSocketArrayResource]);
+                    } else {
+                        $jsonMessage = $this->prepare($socketMessage);
+                        $this->send($jsonMessage);
+                    }
                     break 2;
                 }
 
@@ -148,8 +176,8 @@ class WebSocketServer
                     // The following 2 lines send notification about disconnected connection
                     //$connectionACK = $this->connectionDisconnectACK($client_ip_address);
                     //$this->send($connectionACK);
-                    $newSocketIndex = array_search($newSocketArrayResource, $this->clientSocketArray);
-                    unset($this->clientSocketArray[$newSocketIndex]);
+                    $newSocketIndex = array_search($newSocketArrayResource, $this->clientSockets);
+                    unset($this->clientSockets[$newSocketIndex]);
                 }
             }
         }
