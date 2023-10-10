@@ -69,7 +69,8 @@ class WebSocketServer
         return $header.$socketData;
     }
 
-    function doHandshake($received_header,$client_socket_resource, $host_name, $port) {
+    protected function handshake($received_header, $client_socket_resource, $host_name, $port)
+    {
         $headers = array();
         $lines = preg_split("/\r\n/", $received_header);
         foreach($lines as $line)
@@ -92,35 +93,21 @@ class WebSocketServer
         socket_write($client_socket_resource,$buffer,strlen($buffer));
     }
 
-    function newConnectionACK($client_ip_address)
-    {
-        $message = 'New client ' . $client_ip_address.' joined';
-        $messageArray = array('message'=>$message,'message_type'=>'chat-connection-ack');
-        $ACK = $this->seal(json_encode($messageArray));
-        return $ACK;
-    }
-
-    function connectionDisconnectACK($client_ip_address)
-    {
-        $message = 'Client ' . $client_ip_address.' disconnected';
-        $messageArray = array('message'=>$message,'message_type'=>'chat-connection-ack');
-        $ACK = $this->seal(json_encode($messageArray));
-        return $ACK;
-    }
-
     protected function prepare($socketMessage)
     {
         $message = null;
+
         if ($socketMessage && is_string($socketMessage) && $socketMessage[0] == '{') {
             $message = json_decode($socketMessage, true);
         }
+
         if (empty($message)) {
             $message = [
                 'message' => $socketMessage,
             ];
         }
 
-        return $this->seal(json_encode($message));
+        return $message;
     }
 
     protected function add($socket, $greeting)
@@ -143,20 +130,38 @@ class WebSocketServer
         unset($this->clients[$socketId]);
     }
 
+    protected function welcome($socket, $info)
+    {
+        $welcomeMessage = [
+            'message' => 'Welcome to the PHP WebSocket Server, your address is ' . $info['address'] . ':' . $info['port'] . '.',
+        ];
+
+        $this->send($welcomeMessage, ['socket' => $socket]);
+    }
+
     protected function identify($socket, $message)
     {
+        return [
+            'forward' => true,
+        ];
+    }
 
+    protected function receive($socket, $message)
+    {
+        $this->send($message, ['broadcast' => true]);
     }
 
     public function run()
     {
         $socketResource = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+
         socket_set_option($socketResource, SOL_SOCKET, SO_REUSEADDR, 1);
         socket_bind($socketResource, 0, $this->port);
         socket_listen($socketResource);
 
         $null = null;
         $this->clientSockets = array($socketResource);
+
         while (true) {
             $newSocketArray = $this->clientSockets;
             socket_select($newSocketArray, $null, $null, 0, 10);
@@ -166,12 +171,11 @@ class WebSocketServer
                 $this->clientSockets[] = $newSocket;
 
                 $header = socket_read($newSocket, 1024);
-                $this->doHandshake($header, $newSocket, $this->host, $this->port);
+                $this->handshake($header, $newSocket, $this->host, $this->port);
 
-                socket_getpeername($newSocket, $client_ip_address);
-                $connectionACK = $this->newConnectionACK($client_ip_address);
-
-                $this->send($connectionACK, ['socket' => $newSocket]);
+                $socketId = md5(spl_object_hash($newSocket));
+                socket_getpeername($newSocket, $address, $port);
+                $this->welcome($newSocket, ['id' => $socketId, 'address' => $address, 'port' => $port]);
 
                 $newSocketIndex = array_search($socketResource, $newSocketArray);
                 unset($newSocketArray[$newSocketIndex]);
@@ -180,13 +184,18 @@ class WebSocketServer
             foreach ($newSocketArray as $newSocketArrayResource) {
                 while (socket_recv($newSocketArrayResource, $socketData, 1024, 0) >= 1) {
                     $socketMessage = $this->unseal($socketData);
+                    $jsonMessage = $this->prepare($socketMessage);
                     $socketId = md5(spl_object_hash($newSocketArrayResource));
                     if (empty($this->clients[$socketId])) {
-                        $this->add($newSocketArrayResource, $socketMessage);
-                        $this->send(['welcome' => $socketId], ['socket' => $newSocketArrayResource]);
+                        $identify = $this->identify($newSocketArrayResource, $jsonMessage);
+                        if ($identify) {
+                            $this->add($newSocketArrayResource, $socketMessage, $identify);
+                            if (isset($identify['forward']) && $identify['forward']) {
+                                $this->receive($newSocketArrayResource, $jsonMessage);
+                            }
+                        }
                     } else {
-                        $jsonMessage = $this->prepare($socketMessage);
-                        $this->send($jsonMessage);
+                        $this->receive($newSocketArrayResource, $jsonMessage);
                     }
                     break 2;
                 }
@@ -195,9 +204,8 @@ class WebSocketServer
                 $socketData = @socket_read($newSocketArrayResource, 1024, PHP_NORMAL_READ);
                 if ($socketData === false) {
                     socket_getpeername($newSocketArrayResource, $client_ip_address);
-                    // The following 2 lines send notification about disconnected connection
-                    //$connectionACK = $this->connectionDisconnectACK($client_ip_address);
-                    //$this->send($connectionACK);
+                    // The following line send notification about disconnected connection
+                    //$this->send(['message' => 'Client ' . $client_ip_address . ' disconnected'], ['broadcast' => true]);
                     $this->remove($newSocketArrayResource);
                 }
             }
@@ -208,12 +216,23 @@ class WebSocketServer
 }
 
 $server = new class(WEBSOCKET_HOST, WEBSOCKET_PORT) extends WebSocketServer {
+
+    protected function welcome($socket, $info)
+    {
+        $this->send($info, ['socket' => $socket]);
+    }
+
     protected function indetify($socket, $message)
     {
         if (empty($message['session'])) {
             $this->send(['error' => 'Session is required'], ['socket' => $socket]);
-            return;
+
+            return false;
         }
+
+        return [
+            'forward' => true,
+        ];
     }
 };
 
