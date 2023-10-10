@@ -24,9 +24,11 @@ class WebSocketServer
 
         $messageLength = strlen($message);
         foreach ($this->clientSockets as $clientSocket) {
+            $socketId = $this->id($clientSocket);
             if (
                 (isset($to['broadcast']) && $to['broadcast']) ||
-                (isset($to['socket']) && $to['socket'] == $clientSocket)
+                (isset($to['socket']) && $to['socket'] == $clientSocket) ||
+                (isset($to['identity']) && $this->match($socketId, $to['identity']))
             ) {
                 @socket_write($clientSocket, $message, $messageLength);
             }
@@ -96,6 +98,21 @@ class WebSocketServer
         return md5(spl_object_hash($socket));
     }
 
+    protected function match($socketId, $identity)
+    {
+        if (empty($this->clients[$socketId])) {
+            return false;
+        }
+
+        foreach ($identity as $key => $value) {
+            if ($this->clients[$socketId][$key] != $value) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     protected function prepare($socketMessage)
     {
         $message = null;
@@ -127,6 +144,8 @@ class WebSocketServer
         }
 
         $this->clients[$socketId] = $client;
+
+        return $client;
     }
 
     protected function remove($newSocketArrayResource)
@@ -154,9 +173,14 @@ class WebSocketServer
         ];
     }
 
-    protected function receive($socket, $message)
+    protected function receive($client, $message)
     {
         $this->send($message, ['broadcast' => true]);
+    }
+
+    protected function log($message)
+    {
+        echo json_encode($message) . PHP_EOL;
     }
 
     public function run()
@@ -169,6 +193,8 @@ class WebSocketServer
 
         $null = null;
         $this->clientSockets = array($socketResource);
+
+        $this->log(['message' => 'Server started on ' . $this->host . ':' . $this->port . '.']);
 
         while (true) {
             $newSocketArray = $this->clientSockets;
@@ -184,6 +210,7 @@ class WebSocketServer
                 $socketId = md5(spl_object_hash($newSocket));
                 socket_getpeername($newSocket, $address, $port);
                 $this->welcome($newSocket, ['id' => $socketId, 'address' => $address, 'port' => $port]);
+                $this->log(['message' => 'Client ' . $socketId . ' has connected.', 'address' => $address, 'port' => $port]);
 
                 $newSocketIndex = array_search($socketResource, $newSocketArray);
                 unset($newSocketArray[$newSocketIndex]);
@@ -196,13 +223,14 @@ class WebSocketServer
                     if (empty($this->clients[$socketId])) {
                         $identify = $this->identify($newSocketArrayResource, $jsonMessage);
                         if ($identify) {
-                            $this->add($newSocketArrayResource, $identify);
+                            $client = $this->add($newSocketArrayResource, $identify);
+                            $this->log(['message' => 'Client ' . $socketId . ' has identified.', 'client' => $client]);
                             if (isset($identify['forward']) && $identify['forward']) {
-                                $this->receive($newSocketArrayResource, $jsonMessage);
+                                $this->receive($client, $jsonMessage);
                             }
                         }
                     } else {
-                        $this->receive($newSocketArrayResource, $jsonMessage);
+                        $this->receive($this->clients[$socketId], $jsonMessage);
                     }
                     break 2;
                 }
@@ -241,7 +269,24 @@ $server = new class(WEBSOCKET_HOST, WEBSOCKET_PORT) extends WebSocketServer {
 
         $this->send(['message' => 'Successfully identified'], ['socket' => $socket]);
 
-        return true;
+        return [
+            'session' => $message['session'],
+        ];
+    }
+
+    protected function receive($client, $message)
+    {
+        $message['from'] = $client['id'];
+
+        if (empty($message['to'])) {
+            $this->send(['error' => 'missing to'], ['socket' => $client['socket']]);
+
+            return;
+        }
+
+        $this->send($message, ['identity' => [
+            'session' => 'ciao'
+        ]]);
     }
 };
 
