@@ -73,11 +73,9 @@ class WebSocketServer
     {
         $headers = array();
         $lines = preg_split("/\r\n/", $received_header);
-        foreach($lines as $line)
-        {
+        foreach ($lines as $line) {
             $line = chop($line);
-            if(preg_match('/\A(\S+): (.*)\z/', $line, $matches))
-            {
+            if (preg_match('/\A(\S+): (.*)\z/', $line, $matches)) {
                 $headers[$matches[1]] = $matches[2];
             }
         }
@@ -91,6 +89,11 @@ class WebSocketServer
             "WebSocket-Location: ws://$host_name:$port/demo/shout.php\r\n".
             "Sec-WebSocket-Accept:$secAccept\r\n\r\n";
         socket_write($client_socket_resource,$buffer,strlen($buffer));
+    }
+
+    protected function id($socket)
+    {
+        return md5(spl_object_hash($socket));
     }
 
     protected function prepare($socketMessage)
@@ -110,15 +113,20 @@ class WebSocketServer
         return $message;
     }
 
-    protected function add($socket, $greeting)
+    protected function add($socket, $identity)
     {
-        $socketId = md5(spl_object_hash($socket));
+        $socketId = $this->id($socket);
 
-        $this->clients[$socketId] = [
+        $client = [
             'id' => $socketId,
             'socket' => $socket,
-            'greeting' => $greeting
         ];
+
+        if ($identity && is_array($identity)) {
+            $client = array_merge($identity, $client);
+        }
+
+        $this->clients[$socketId] = $client;
     }
 
     protected function remove($newSocketArrayResource)
@@ -183,13 +191,12 @@ class WebSocketServer
 
             foreach ($newSocketArray as $newSocketArrayResource) {
                 while (socket_recv($newSocketArrayResource, $socketData, 1024, 0) >= 1) {
-                    $socketMessage = $this->unseal($socketData);
-                    $jsonMessage = $this->prepare($socketMessage);
-                    $socketId = md5(spl_object_hash($newSocketArrayResource));
+                    $socketId = $this->id($newSocketArrayResource);
+                    $jsonMessage = $this->prepare($this->unseal($socketData));
                     if (empty($this->clients[$socketId])) {
                         $identify = $this->identify($newSocketArrayResource, $jsonMessage);
                         if ($identify) {
-                            $this->add($newSocketArrayResource, $socketMessage, $identify);
+                            $this->add($newSocketArrayResource, $identify);
                             if (isset($identify['forward']) && $identify['forward']) {
                                 $this->receive($newSocketArrayResource, $jsonMessage);
                             }
@@ -219,10 +226,12 @@ $server = new class(WEBSOCKET_HOST, WEBSOCKET_PORT) extends WebSocketServer {
 
     protected function welcome($socket, $info)
     {
+        $info['message'] = 'Welcome to the PHP WebSocket Server, your address is ' . $info['address'] . ':' . $info['port'] . '.';
+
         $this->send($info, ['socket' => $socket]);
     }
 
-    protected function indetify($socket, $message)
+    protected function identify($socket, $message)
     {
         if (empty($message['session'])) {
             $this->send(['error' => 'Session is required'], ['socket' => $socket]);
@@ -230,9 +239,9 @@ $server = new class(WEBSOCKET_HOST, WEBSOCKET_PORT) extends WebSocketServer {
             return false;
         }
 
-        return [
-            'forward' => true,
-        ];
+        $this->send(['message' => 'Successfully identified'], ['socket' => $socket]);
+
+        return true;
     }
 };
 
