@@ -5,8 +5,16 @@ define('WEBSOCKET_PORT', $argv[2] ?? 8081);
 
 class WebSocketServer
 {
+    protected $host;
+    protected $port;
     protected $clients;
     protected $clientSockets;
+
+    public function __construct($host, $port)
+    {
+        $this->host = $host;
+        $this->port = $port;
+    }
 
     protected function send($message, $to = ['broadcast' => true])
     {
@@ -126,11 +134,20 @@ class WebSocketServer
         ];
     }
 
+    protected function remove($newSocketArrayResource)
+    {
+        $newSocketIndex = array_search($newSocketArrayResource, $this->clientSockets);
+        unset($this->clientSockets[$newSocketIndex]);
+
+        $socketId = md5(spl_object_hash($newSocketArrayResource));
+        unset($this->clients[$socketId]);
+    }
+
     public function run()
     {
         $socketResource = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
         socket_set_option($socketResource, SOL_SOCKET, SO_REUSEADDR, 1);
-        socket_bind($socketResource, 0, WEBSOCKET_PORT);
+        socket_bind($socketResource, 0, $this->port);
         socket_listen($socketResource);
 
         $null = null;
@@ -144,7 +161,7 @@ class WebSocketServer
                 $this->clientSockets[] = $newSocket;
 
                 $header = socket_read($newSocket, 1024);
-                $this->doHandshake($header, $newSocket, WEBSOCKET_HOST, WEBSOCKET_PORT);
+                $this->doHandshake($header, $newSocket, $this->host, $this->port);
 
                 socket_getpeername($newSocket, $client_ip_address);
                 $connectionACK = $this->newConnectionACK($client_ip_address);
@@ -176,8 +193,7 @@ class WebSocketServer
                     // The following 2 lines send notification about disconnected connection
                     //$connectionACK = $this->connectionDisconnectACK($client_ip_address);
                     //$this->send($connectionACK);
-                    $newSocketIndex = array_search($newSocketArrayResource, $this->clientSockets);
-                    unset($this->clientSockets[$newSocketIndex]);
+                    $this->remove($newSocketArrayResource);
                 }
             }
         }
@@ -186,5 +202,5 @@ class WebSocketServer
     }
 }
 
-$server = new WebSocketServer();
+$server = new WebSocketServer(WEBSOCKET_HOST, WEBSOCKET_PORT);
 $server->run();
