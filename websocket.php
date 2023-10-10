@@ -143,6 +143,11 @@ class WebSocketServer
         unset($this->clients[$socketId]);
     }
 
+    protected function identify($socket, $message)
+    {
+
+    }
+
     public function run()
     {
         $socketResource = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
@@ -202,5 +207,14 @@ class WebSocketServer
     }
 }
 
-$server = new WebSocketServer(WEBSOCKET_HOST, WEBSOCKET_PORT);
+$server = new class(WEBSOCKET_HOST, WEBSOCKET_PORT) extends WebSocketServer {
+    protected function indetify($socket, $message)
+    {
+        if (empty($message['session'])) {
+            $this->send(['error' => 'Session is required'], ['socket' => $socket]);
+            return;
+        }
+    }
+};
+
 $server->run();
