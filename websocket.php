@@ -105,7 +105,7 @@ class WebSocketServer
         }
 
         foreach ($identity as $key => $value) {
-            if ($this->clients[$socketId][$key] != $value) {
+            if (isset($this->clients[$socketId][$key]) && $this->clients[$socketId][$key] != $value) {
                 return false;
             }
         }
@@ -259,6 +259,7 @@ $server = new class(WEBSOCKET_HOST, WEBSOCKET_PORT) extends WebSocketServer {
         $this->send($info, ['socket' => $socket]);
     }
 
+    /*
     protected function identify($socket, $message)
     {
         if (empty($message['session'])) {
@@ -273,7 +274,7 @@ $server = new class(WEBSOCKET_HOST, WEBSOCKET_PORT) extends WebSocketServer {
             'session' => $message['session'],
         ];
     }
-
+*/
     protected function receive($client, $message)
     {
         $message['from'] = $client['id'];
