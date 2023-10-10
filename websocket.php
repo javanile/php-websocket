@@ -7,10 +7,10 @@ class WebSocketServer
 {
     protected $clientSocketArray;
 
-    function send($message) {
+    protected function send($message)
+    {
         $messageLength = strlen($message);
-        foreach($this->clientSocketArray as $clientSocket)
-        {
+        foreach($this->clientSocketArray as $clientSocket) {
             @socket_write($clientSocket,$message,$messageLength);
         }
         return true;
@@ -81,18 +81,27 @@ class WebSocketServer
         return $ACK;
     }
 
-    function connectionDisconnectACK($client_ip_address) {
+    function connectionDisconnectACK($client_ip_address)
+    {
         $message = 'Client ' . $client_ip_address.' disconnected';
         $messageArray = array('message'=>$message,'message_type'=>'chat-connection-ack');
         $ACK = $this->seal(json_encode($messageArray));
         return $ACK;
     }
 
-    function createChatBoxMessage($chat_user,$chat_box_message) {
-        $message = $chat_user . ": " . $chat_box_message . "\n";
-        $messageArray = array('message'=>$message,'message_type'=>'chat-box-html');
-        $chatMessage = $this->seal(json_encode($messageArray));
-        return $chatMessage;
+    protected function prepare($socketMessage)
+    {
+        $message = null;
+        if ($socketMessage[0] == '{') {
+            $message = json_decode($socketMessage, true);
+        }
+        if (empty($message)) {
+            $message = [
+                'message' => $socketMessage,
+            ];
+        }
+
+        return $this->seal(json_encode($message));
     }
 
     public function run()
@@ -125,20 +134,20 @@ class WebSocketServer
             }
 
             foreach ($newSocketArray as $newSocketArrayResource) {
-                while(socket_recv($newSocketArrayResource, $socketData, 1024, 0) >= 1){
+                while (socket_recv($newSocketArrayResource, $socketData, 1024, 0) >= 1) {
                     $socketMessage = $this->unseal($socketData);
-                    $messageObj = json_decode($socketMessage);
-
-                    $chat_box_message = $this->createChatBoxMessage($messageObj->chat_user, $messageObj->chat_message);
-                    $this->send($chat_box_message);
+                    $jsonMessage = $this->prepare($socketMessage);
+                    $this->send($jsonMessage);
                     break 2;
                 }
 
+                // Handle disconnected client
                 $socketData = @socket_read($newSocketArrayResource, 1024, PHP_NORMAL_READ);
                 if ($socketData === false) {
                     socket_getpeername($newSocketArrayResource, $client_ip_address);
-                    $connectionACK = $this->connectionDisconnectACK($client_ip_address);
-                    $this->send($connectionACK);
+                    // The following 2 lines send notification about disconnected connection
+                    //$connectionACK = $this->connectionDisconnectACK($client_ip_address);
+                    //$this->send($connectionACK);
                     $newSocketIndex = array_search($newSocketArrayResource, $this->clientSocketArray);
                     unset($this->clientSocketArray[$newSocketIndex]);
                 }
