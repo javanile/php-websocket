@@ -10,10 +10,10 @@ class WebSocketServer
     protected $clients;
     protected $clientSockets;
 
-    public function __construct($host, $port)
+    public function __construct($host = null, $port = null)
     {
-        $this->host = $host;
-        $this->port = $port;
+        $this->host = $host ?: WEBSOCKET_HOST;
+        $this->port = $port ?: WEBSOCKET_PORT;
     }
 
     protected function send($message, $to = ['broadcast' => true])
@@ -250,7 +250,7 @@ class WebSocketServer
     }
 }
 
-$server = new class(WEBSOCKET_HOST, WEBSOCKET_PORT) extends WebSocketServer {
+$server = new class extends WebSocketServer {
 
     protected function welcome($socket, $info)
     {
@@ -259,7 +259,6 @@ $server = new class(WEBSOCKET_HOST, WEBSOCKET_PORT) extends WebSocketServer {
         $this->send($info, ['socket' => $socket]);
     }
 
-    /*
     protected function identify($socket, $message)
     {
         if (empty($message['session'])) {
@@ -274,7 +273,7 @@ $server = new class(WEBSOCKET_HOST, WEBSOCKET_PORT) extends WebSocketServer {
             'session' => $message['session'],
         ];
     }
-*/
+
     protected function receive($client, $message)
     {
         $message['from'] = $client['id'];
@@ -292,3 +291,5 @@ $server = new class(WEBSOCKET_HOST, WEBSOCKET_PORT) extends WebSocketServer {
 };
 
 $server->run();
+
+
