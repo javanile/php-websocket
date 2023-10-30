@@ -1,7 +1,7 @@
 {
     "name": "javanile/php-websocket",
     "require-dev": {
-        "phrity/websocket": "^2.0",
+        "phrity/websocket": "1.7",
         "phpunit/phpunit": "^10",
         "symfony/process": "^6.3"
     },
