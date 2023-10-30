@@ -250,46 +250,46 @@ class WebSocketServer
     }
 }
 
-$server = new class extends WebSocketServer {
+if (php_sapi_name() == 'cli' && __FILE__ == realpath($argv[0])) {
+    $server = new class extends WebSocketServer {
 
-    protected function welcome($socket, $info)
-    {
-        $info['message'] = 'Welcome to the PHP WebSocket Server, your address is ' . $info['address'] . ':' . $info['port'] . '.';
+        protected function welcome($socket, $info)
+        {
+            $info['message'] = 'Welcome to the PHP WebSocket Server, your address is ' . $info['address'] . ':' . $info['port'] . '.';
 
-        $this->send($info, ['socket' => $socket]);
-    }
-
-    protected function identify($socket, $message)
-    {
-        if (empty($message['session'])) {
-            $this->send(['error' => 'Session is required'], ['socket' => $socket]);
-
-            return false;
+            $this->send($info, ['socket' => $socket]);
         }
 
-        $this->send(['message' => 'Successfully identified'], ['socket' => $socket]);
+        protected function identify($socket, $message)
+        {
+            if (empty($message['session'])) {
+                $this->send(['error' => 'Session is required'], ['socket' => $socket]);
 
-        return [
-            'session' => $message['session'],
-        ];
-    }
+                return false;
+            }
 
-    protected function receive($client, $message)
-    {
-        $message['from'] = $client['id'];
+            $this->send(['message' => 'Successfully identified'], ['socket' => $socket]);
 
-        if (empty($message['to'])) {
-            $this->send(['error' => 'missing to'], ['socket' => $client['socket']]);
-
-            return;
+            return [
+                'session' => $message['session'],
+            ];
         }
 
-        $this->send($message, ['identity' => [
-            'session' => 'ciao'
-        ]]);
-    }
-};
+        protected function receive($client, $message)
+        {
+            $message['from'] = $client['id'];
 
-$server->run();
+            if (empty($message['to'])) {
+                $this->send(['error' => 'missing to'], ['socket' => $client['socket']]);
 
+                return;
+            }
 
+            $this->send($message, ['identity' => [
+                'session' => 'ciao'
+            ]]);
+        }
+    };
+
+    $server->run();
+}
